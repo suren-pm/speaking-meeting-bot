@@ -1,72 +1,58 @@
-import openai
 import json
 import os
 from typing import Any, Dict, Optional
+
 from loguru import logger
+
 
 async def extract_persona_details_from_prompt(
     prompt_text: str,
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """
-    Analyzes a prompt to extract persona details like name, gender, description, and characteristics.
+    Analyzes a prompt to extract persona details.
+    Uses Anthropic Claude instead of OpenAI GPT-4o.
     """
-    prompt = f'''Analyze the following text prompt and extract the persona's name, gender, a brief description for image generation, and a list of characteristics.
-If no explicit name is mentioned, generate a concise, descriptive name that clearly indicates the persona's role or key trait, based on the description and characteristics. This name should *not* be a personal name unless explicitly provided in the prompt. For example, if the description is about an interviewer, the name could be 'Interviewer Bot'.
+    import anthropic
+
+    extraction_prompt = f"""Analyze the following text prompt and extract the persona's name, gender, a brief description for image generation, and a list of characteristics. If no explicit name is mentioned, generate a concise, descriptive name that clearly indicates the persona's role or key trait, based on the description and characteristics. This name should not be a personal name unless explicitly provided in the prompt.
 
 Prompt: {prompt_text}
 
 Extract the information in the following JSON format. If a field cannot be determined, use null or an empty list:
 {{
-    "name": "string or null",
-    "gender": "male, female, non-binary, or null",
-    "description": "string or null",
-    "characteristics": ["string", ...]
+  "name": "string or null",
+  "gender": "male, female, non-binary, or null",
+  "description": "string or null",
+  "characteristics": ["string", ...]
 }}
 
-JSON Output:'''
+Return ONLY valid JSON, no other text."""
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        logger.error("OPENAI_API_KEY environment variable not set.")
+        logger.error("ANTHROPIC_API_KEY environment variable not set.")
         return None
 
     try:
-        # Use async client
-        client = openai.AsyncOpenAI(api_key=api_key)
-
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": prompt},
-            ],
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": extraction_prompt}],
         )
-
-        content = response.choices[0].message.content
-        if content:
-            extracted_data = json.loads(content)
-            
-            # Apply default values and handle nulls/empty strings
-            extracted_data["name"] = extracted_data.get("name") or "Bot"
-            extracted_data["gender"] = extracted_data.get("gender") or "male"
-
-            extracted_data['description'] = extracted_data.get("description") or prompt_text
-
-            # Ensure characteristics is a list, default to empty list if null or not list
-            characteristics = extracted_data.get("characteristics")
-            extracted_data["characteristics"] = characteristics if isinstance(characteristics, list) else []
-            
-            return extracted_data
-        else:
-            logger.warning("LLM returned empty content for persona details extraction.")
-            return None
-
+        content = message.content[0].text.strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        extracted_data = json.loads(content)
+        extracted_data["name"] = extracted_data.get("name") or "Custom Bot"
+        extracted_data["gender"] = extracted_data.get("gender") or "male"
+        extracted_data["description"] = extracted_data.get("description") or prompt_text
+        characteristics = extracted_data.get("characteristics")
+        extracted_data["characteristics"] = characteristics if isinstance(characteristics, list) else []
+        return extracted_data
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON from LLM response: {e}")
         return None
-    except openai.AuthenticationError as e:
-        logger.error(f"OpenAI Authentication Error: {e}. Please check your API key.")
-        return None
     except Exception as e:
-        logger.error(f"Error during LLM persona details extraction: {e}")
-        return None 
+        logger.error(f"Error during persona details extraction: {e}")
+        return None
