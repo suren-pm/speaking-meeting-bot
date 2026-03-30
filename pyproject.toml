@@ -18,7 +18,7 @@ api = "api:start_server"
 python = "^3.11"
 python-dotenv = "^1.0.1"
 # AI pipeline dependencies
-pipecat-ai = {extras = ["anthropic", "cartesia", "daily", "deepgram", "openai", "silero", "websocket"], version = "^0.0.69"}
+pipecat-ai = {extras = ["anthropic", "cartesia", "daily", "deepgram", "silero", "websocket"], version = "^0.0.69"}
 ruff = "^0.7.3"
 pytz = "^2024.2"
 aiohttp = "^3.10.10"
@@ -34,18 +34,3 @@ daily = "^0.2.1"
 
 [tool.poetry.group.dev.dependencies]
 grpcio-tools = "<=1.67.1"
-ipdb = "^0.13.13"
-
-[tool.ruff]
-line-length = 88
-indent-width = 4
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
