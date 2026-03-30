@@ -166,8 +166,8 @@ def create_meeting_bot(
         # Add optional fields
         if bot_image:
             config["bot_image"] = str(bot_image)
-        if entry_message:
-            config["entry_message"] = entry_message
+        # entry_message intentionally excluded from Meeting BaaS API payload
+        # (prevents text appearing in Meet chat; Pipecat uses it for speech only)
         if extra:
             config["extra"] = extra
 
