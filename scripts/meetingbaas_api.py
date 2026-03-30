@@ -174,7 +174,7 @@ def create_meeting_bot(
         # Ensure all values are serializable
         config = stringify_values(config)
 
-    url = "https://api.meetingbaas.com/bots"
+    url = "https://api.gmeetbot.com/bots"
     headers = {
         "Content-Type": "application/json",
         "x-meeting-baas-api-key": api_key,
@@ -221,7 +221,7 @@ def leave_meeting_bot(bot_id: str, api_key: str) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    url = f"https://api.meetingbaas.com/bots/{bot_id}"
+    url = f"https://api.gmeetbot.com/bots/{bot_id}"
     headers = {
         "x-meeting-baas-api-key": api_key,
     }
