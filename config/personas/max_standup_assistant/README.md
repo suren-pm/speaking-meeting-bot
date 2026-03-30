@@ -37,6 +37,6 @@ Max speaks with:
 - image: 
 - entry_message: Good morning team! Max here, your standup assistant. Let us get into it. Who wants to go first with their update - yesterday, today, and any blockers?
 - deepgram_voice_id: aura-orion-en
-- cartesia_voice_id: 
+- cartesia_voice_id: 00000000-0000-0000-0000-000000000000
 - gender: MALE
 - relevant_links: 
