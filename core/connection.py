@@ -1,5 +1,7 @@
 """Connection management for WebSocket clients and Pipecat processes."""
 
+import json
+import os
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
@@ -7,10 +9,53 @@ from fastapi import WebSocket
 
 from meetingbaas_pipecat.utils.logger import logger
 
+# File path for persisting meeting details across server restarts
+_MEETING_DETAILS_FILE = "/tmp/meeting_details.json"
+
+
+def _load_meeting_details() -> dict:
+    """Load meeting details from disk if the file exists."""
+    try:
+        if os.path.exists(_MEETING_DETAILS_FILE):
+            with open(_MEETING_DETAILS_FILE, "r") as f:
+                raw = json.load(f)
+            # JSON deserializes tuples as lists; convert back to tuples
+            return {k: tuple(v) for k, v in raw.items()}
+    except Exception as e:
+        logger.warning(f"Could not load meeting details from disk: {e}")
+    return {}
+
+
+def _save_meeting_details(data: dict) -> None:
+    """Persist meeting details to disk."""
+    try:
+        with open(_MEETING_DETAILS_FILE, "w") as f:
+            # Tuples are serialized as JSON arrays
+            json.dump({k: list(v) for k, v in data.items()}, f)
+    except Exception as e:
+        logger.warning(f"Could not save meeting details to disk: {e}")
+
+
+class _PersistentMeetingDetails(dict):
+    """A dict subclass that persists to disk on every mutation."""
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        _save_meeting_details(self)
+
+    def pop(self, key, *args):
+        result = super().pop(key, *args)
+        _save_meeting_details(self)
+        return result
+
+
 # Global dictionary to store meeting details for each client
+# Loaded from disk on startup so state survives server restarts
 MEETING_DETAILS: Dict[
     str, Tuple[str, str, Optional[str], bool, str]
-] = {}  # client_id -> (meeting_url, persona_name, meetingbaas_bot_id, enable_tools, streaming_audio_frequency)
+] = _PersistentMeetingDetails(
+    _load_meeting_details()
+)  # client_id -> (meeting_url, persona_name, meetingbaas_bot_id, enable_tools, streaming_audio_frequency)
 
 # Global dictionary to store Pipecat processes
 PIPECAT_PROCESSES: Dict[str, subprocess.Popen] = {}  # client_id -> process
@@ -39,15 +84,12 @@ class ConnectionRegistry:
     async def disconnect(self, client_id: str, is_pipecat: bool = False):
         """Remove a connection and close the websocket."""
         try:
-            # First, remove the connection from our dictionaries before attempting to close it
             if is_pipecat:
                 if client_id in self.pipecat_connections:
                     websocket = self.pipecat_connections.pop(client_id)
-                    # Try to close it if possible
                     try:
                         await websocket.close(code=1000, reason="Bot disconnected")
                     except Exception as e:
-                        # It's normal for this to fail if the connection is already closed
                         self.logger.debug(
                             f"Could not close Pipecat WebSocket for {client_id}: {e}"
                         )
@@ -55,17 +97,14 @@ class ConnectionRegistry:
             else:
                 if client_id in self.active_connections:
                     websocket = self.active_connections.pop(client_id)
-                    # Try to close it if possible
                     try:
                         await websocket.close(code=1000, reason="Bot disconnected")
                     except Exception as e:
-                        # It's normal for this to fail if the connection is already closed
                         self.logger.debug(
                             f"Could not close client WebSocket for {client_id}: {e}"
                         )
                     self.logger.info(f"Client {client_id} disconnected")
         except Exception as e:
-            # This should rarely happen now, but just in case
             self.logger.debug(f"Error during disconnect for {client_id}: {e}")
 
     def get_client(self, client_id: str) -> Optional[WebSocket]:
