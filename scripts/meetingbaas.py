@@ -130,38 +130,56 @@ async def get_jira_issue(params: FunctionCallParams):
         await params.result_callback(f"Error fetching {ticket_id}: {str(e)}")
 
 
-async def log_task_to_slack(params: FunctionCallParams):
-    """Log a task assigned to Max in the standup to the shared max-ai Slack channel."""
+async def log_task_to_server(params: FunctionCallParams):
+    """Log a task assigned to Max in the standup to the shared task server."""
     task_description = params.arguments.get("task_description", "")
     ticket_id = params.arguments.get("ticket_id", "")
 
-    slack_token = os.getenv("SLACK_BOT_TOKEN", "")
-    channel_id = os.getenv("SLACK_MAX_AI_CHANNEL", "C0AQ8M876E5")
-
-    if not slack_token:
-        await params.result_callback("Got it, I will take that on.")
-        return
-
-    now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M")
-    message = f"*TASK ASSIGNED* [{now}]\n"
-    if ticket_id:
-        message += f"Ticket: {ticket_id}\n"
-    message += f"Task: {task_description}"
+    port = os.getenv("PORT", "8000")
+    server_url = f"http://localhost:{port}"
+    api_key = os.getenv("MAX_BRAIN_API_KEY", "max-brain-secret")
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://slack.com/api/chat.postMessage",
-                headers={"Authorization": f"Bearer {slack_token}", "Content-Type": "application/json"},
-                json={"channel": channel_id, "text": message},
+                f"{server_url}/tasks/log",
+                headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                json={"task_description": task_description, "ticket_id": ticket_id},
             ) as resp:
-                data = await resp.json()
-                if data.get("ok"):
+                if resp.status == 201:
                     await params.result_callback("Got it. Task logged.")
                 else:
                     await params.result_callback("Got it, I will take that on.")
     except Exception as e:
         await params.result_callback("Got it, I will take that on.")
+
+
+async def get_task_results(params: FunctionCallParams):
+    """Get completed testing results so Max can report them in standup."""
+    port = os.getenv("PORT", "8000")
+    server_url = f"http://localhost:{port}"
+    api_key = os.getenv("MAX_BRAIN_API_KEY", "max-brain-secret")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{server_url}/tasks/results",
+                headers={"x-api-key": api_key},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = data.get("results", [])
+                    if not results:
+                        await params.result_callback("No completed test results yet.")
+                    else:
+                        lines = []
+                        for r in results[-5:]:
+                            lines.append(f"{r.get('ticket_id', 'Task')}: {r.get('summary', r.get('result', ''))}")
+                        await params.result_callback("Here are the recent results: " + ". ".join(lines))
+                else:
+                    await params.result_callback("Could not fetch results right now.")
+    except Exception as e:
+        await params.result_callback("Could not fetch results right now.")
 
 async def main(
     meeting_url: str = "",
@@ -268,7 +286,8 @@ async def main(
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_time", get_time)
         llm.register_function("get_jira_issue", get_jira_issue)
-        llm.register_function("log_task_to_slack", log_task_to_slack)
+        llm.register_function("log_task_to_server", log_task_to_server)
+        llm.register_function("get_task_results", get_task_results)
 
         weather_function = FunctionSchema(
             name="get_weather",
@@ -313,8 +332,8 @@ async def main(
         )
 
         slack_function = FunctionSchema(
-            name="log_task_to_slack",
-            description="Log a task assigned to Max during the standup to the shared task tracker in Slack",
+            name="log_task_to_server",
+            description="Log a task assigned to Max during the standup to the shared task tracker",
             properties={
                 "task_description": {
                     "type": "string",
@@ -328,7 +347,15 @@ async def main(
             required=["task_description"],
         )
 
-        tools = ToolsSchema(standard_tools=[weather_function, time_function, jira_function, slack_function])
+
+        results_function = FunctionSchema(
+            name="get_task_results",
+            description="Get completed testing results to report back in standup",
+            properties={},
+            required=[],
+        )
+
+        tools = ToolsSchema(standard_tools=[weather_function, time_function, jira_function, slack_function, results_function])
     else:
         log_and_flush(logging.INFO, "[TOOLS] Function tools are disabled")
         tools = None
