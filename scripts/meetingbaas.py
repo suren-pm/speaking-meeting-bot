@@ -325,7 +325,7 @@ async def main(
             properties={
                 "ticket_id": {
                     "type": "string",
-                    "description": "The Jira ticket ID, e.g. EP-42 or PROJ-123",
+                    "description": "The Jira ticket ID, e.g. ESB-42 or ESB-123",
                 },
             },
             required=["ticket_id"],
@@ -341,7 +341,7 @@ async def main(
                 },
                 "ticket_id": {
                     "type": "string",
-                    "description": "Optional Jira ticket ID associated with this task",
+                    "description": "Optional Jira ticket ID associated with this task, e.g. ESB-42",
                 },
             },
             required=["task_description"],
