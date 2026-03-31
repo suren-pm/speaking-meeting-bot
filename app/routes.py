@@ -558,3 +558,80 @@ async def meetingbaas_webhook(request: Request):
     except Exception as e:
         logger.error(f"Error processing webhook: {e}")
         return {"status": "error", "message": str(e)}
+
+
+# ─── Max Brain: Shared Task Store ────────────────────────────────────────────
+import os as _os
+_task_store: list = []
+_result_store: list = []
+_MAX_BRAIN_KEY = _os.getenv("MAX_BRAIN_API_KEY", "max-brain-secret")
+
+
+def _check_brain_key(request: Request):
+    key = request.headers.get("x-api-key", "")
+    if key != _MAX_BRAIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.post("/tasks/log", tags=["max-brain"], status_code=status.HTTP_201_CREATED)
+async def log_task(request: Request):
+    """Max calls this during standup when assigned a new task."""
+    _check_brain_key(request)
+    try:
+        body = await request.json()
+        task = {
+            "id": str(uuid.uuid4())[:8],
+            "task": body.get("task_description", ""),
+            "ticket_id": body.get("ticket_id", ""),
+            "logged_at": datetime.utcnow().isoformat(),
+            "status": "pending",
+        }
+        _task_store.append(task)
+        logger.info(f"[MAX BRAIN] Task logged: {task}")
+        return {"status": "ok", "task_id": task["id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[MAX BRAIN] Error logging task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks", tags=["max-brain"])
+async def get_tasks(request: Request):
+    """Cowork reads all tasks assigned to Max."""
+    _check_brain_key(request)
+    return {"tasks": _task_store}
+
+
+@router.post("/tasks/result", tags=["max-brain"], status_code=status.HTTP_201_CREATED)
+async def log_result(request: Request):
+    """Cowork posts a testing result back so Max can report it in the next standup."""
+    _check_brain_key(request)
+    try:
+        body = await request.json()
+        result = {
+            "id": str(uuid.uuid4())[:8],
+            "task_id": body.get("task_id", ""),
+            "ticket_id": body.get("ticket_id", ""),
+            "summary": body.get("summary", ""),
+            "result": body.get("result", ""),
+            "logged_at": datetime.utcnow().isoformat(),
+        }
+        _result_store.append(result)
+        for t in _task_store:
+            if t["id"] == result["task_id"] or (result["ticket_id"] and t["ticket_id"] == result["ticket_id"]):
+                t["status"] = "completed"
+        logger.info(f"[MAX BRAIN] Result logged: {result}")
+        return {"status": "ok", "result_id": result["id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[MAX BRAIN] Error logging result: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/results", tags=["max-brain"])
+async def get_results(request: Request):
+    """Max reads completed testing results to report in standup."""
+    _check_brain_key(request)
+    return {"results": _result_store}
