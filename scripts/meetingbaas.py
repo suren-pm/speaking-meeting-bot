@@ -91,6 +91,78 @@ async def get_time(params: FunctionCallParams):
             f"Invalid location specified. Could not determine time for {location}."
         )
 
+
+
+async def get_jira_issue(params: FunctionCallParams):
+    """Get details of a Jira issue by ticket ID."""
+    ticket_id = params.arguments.get("ticket_id", "").upper().strip()
+    jira_url = os.getenv("JIRA_URL", "")
+    jira_email = os.getenv("JIRA_EMAIL", "")
+    jira_token = os.getenv("JIRA_API_TOKEN", "")
+
+    if not jira_url or not jira_email or not jira_token:
+        await params.result_callback("Jira is not configured. I cannot fetch ticket details right now.")
+        return
+
+    import base64
+    auth = base64.b64encode(f"{jira_email}:{jira_token}".encode()).decode()
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{jira_url}/rest/api/3/issue/{ticket_id}",
+                headers={"Authorization": f"Basic {auth}", "Accept": "application/json"},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    fields = data.get("fields", {})
+                    summary = fields.get("summary", "No summary")
+                    status = fields.get("status", {}).get("name", "Unknown")
+                    assignee = fields.get("assignee") or {}
+                    assignee_name = assignee.get("displayName", "Unassigned")
+                    priority = (fields.get("priority") or {}).get("name", "None")
+                    await params.result_callback(
+                        f"Ticket {ticket_id}: {summary}. Status: {status}. Assigned to: {assignee_name}. Priority: {priority}."
+                    )
+                else:
+                    await params.result_callback(f"Could not find ticket {ticket_id}.")
+    except Exception as e:
+        await params.result_callback(f"Error fetching {ticket_id}: {str(e)}")
+
+
+async def log_task_to_slack(params: FunctionCallParams):
+    """Log a task assigned to Max in the standup to the shared max-ai Slack channel."""
+    task_description = params.arguments.get("task_description", "")
+    ticket_id = params.arguments.get("ticket_id", "")
+
+    slack_token = os.getenv("SLACK_BOT_TOKEN", "")
+    channel_id = os.getenv("SLACK_MAX_AI_CHANNEL", "C0AQ8M876E5")
+
+    if not slack_token:
+        await params.result_callback("Got it, I will take that on.")
+        return
+
+    now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M")
+    message = f"*TASK ASSIGNED* [{now}]\n"
+    if ticket_id:
+        message += f"Ticket: {ticket_id}\n"
+    message += f"Task: {task_description}"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {slack_token}", "Content-Type": "application/json"},
+                json={"channel": channel_id, "text": message},
+            ) as resp:
+                data = await resp.json()
+                if data.get("ok"):
+                    await params.result_callback("Got it. Task logged.")
+                else:
+                    await params.result_callback("Got it, I will take that on.")
+    except Exception as e:
+        await params.result_callback("Got it, I will take that on.")
+
 async def main(
     meeting_url: str = "",
     persona_name: str = "Meeting Bot",
@@ -195,6 +267,8 @@ async def main(
         log_and_flush(logging.INFO, "[TOOLS] Registering function tools")
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_time", get_time)
+        llm.register_function("get_jira_issue", get_jira_issue)
+        llm.register_function("log_task_to_slack", log_task_to_slack)
 
         weather_function = FunctionSchema(
             name="get_weather",
@@ -225,7 +299,36 @@ async def main(
             required=["location"],
         )
 
-        tools = ToolsSchema(standard_tools=[weather_function, time_function])
+
+        jira_function = FunctionSchema(
+            name="get_jira_issue",
+            description="Get the current status and details of a Jira ticket by its ID",
+            properties={
+                "ticket_id": {
+                    "type": "string",
+                    "description": "The Jira ticket ID, e.g. EP-42 or PROJ-123",
+                },
+            },
+            required=["ticket_id"],
+        )
+
+        slack_function = FunctionSchema(
+            name="log_task_to_slack",
+            description="Log a task assigned to Max during the standup to the shared task tracker in Slack",
+            properties={
+                "task_description": {
+                    "type": "string",
+                    "description": "A clear description of the task assigned to Max",
+                },
+                "ticket_id": {
+                    "type": "string",
+                    "description": "Optional Jira ticket ID associated with this task",
+                },
+            },
+            required=["task_description"],
+        )
+
+        tools = ToolsSchema(standard_tools=[weather_function, time_function, jira_function, slack_function])
     else:
         log_and_flush(logging.INFO, "[TOOLS] Function tools are disabled")
         tools = None
